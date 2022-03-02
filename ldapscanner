@@ -7,6 +7,7 @@ use Config::Tiny  ();
 use File::Slurper ();
 use Net::LDAP     ();
 
+die "No config file!" if !-f 'ldapscanner.cfg';
 my $cfg     = Config::Tiny->read('ldapscanner.cfg');
 my @servers = split( ',', $cfg->{'server'}{'hosts'} );
 my $proto   = $cfg->{'server'}{'ldaps'} ? 'ldaps' : 'ldap';
