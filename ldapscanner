@@ -9,23 +9,41 @@ use Net::LDAP     ();
 
 my $cfg     = Config::Tiny->read('ldapscanner.cfg');
 my @servers = split( ',', $cfg->{'server'}{'hosts'} );
+my $proto   = $cfg->{'server'}{'ldaps'} ? 'ldaps' : 'ldap';
 my $port    = $cfg->{'server'}{'port'};
 
 foreach my $server (@servers) {
-    log( "debug", "Querying $server" );
-    my $conn = Net::LDAP->new("ldaps://$server:$port");
-    my $result = $conn->bind;
+    _log( "debug", "Connecting to $proto://$server:$port..." );
+    my $conn = Net::LDAP->new(
+        "$proto://$server:$port",
+        'debug'   => $cfg->{'prefs'}{'loglevel'} eq 'debug',
+        'onerror' => 'die',
+        'async'   => 0,
+    ) or die $@;
+    _log( "debug", "Binding anonymously..." );
+    my $result = $conn->bind( 'anonymous' => 1 );
     $result->code and die $result->error;
+
+    # Login if you wanna do that
+    if( scalar( grep { $cfg->{'creds'}{$_} } qw{id_field id_value pass} ) eq 3 ) {
+        #$conn->unbind;
+        _log( "debug", "Now binding as $cfg->{'creds'}{'id_value'}..." );
+        #$bind_args = "dn=$result->dn";
+        #$result = $conn->bind($bind_args);
+    }
+
     $result = $conn->search(
-        base   => "ou=people,dc=cpanel,dc=net",
-        filter => "(&(objectClass=inetOrgPerson))",
+        base   => $cfg->{'search'}{'base'},
+        filter => $cfg->{'search'}{'filter'},
     );
     $result->code and die $result->error;
-    my $result;
+    foreach my $entry ($result->entries) {
+        $entry->dump;
+    }
     last if $result;
 }
 
-sub log {
+sub _log {
     my ( $level, $msg ) = @_;
     print "$msg\n" if $level eq $cfg->{'prefs'}{'loglevel'};
     return;

@@ -1,0 +1,33 @@
+[server]
+# What's needed to connect?
+# Hosts can be many, separate them with commas
+hosts=ldap.host,another.host
+port=636
+ldaps=1
+
+[search]
+# Put in what records you wanna find (and diff over time) here
+base=ou=superheroes,dc=marvel,dc=comics
+filter=(&(objectClass=capedAvenger))
+
+[creds]
+# If you need to auth with the server in order to get the
+# records you need, then enter the details below.
+# If not, don't.
+# id_field is what is distinct about your LDAP record
+# given the search filter, id_value is the value of the field
+# If the base & filter are the same, just enter it in
+# again here.
+base=ou=superheroes,dc=marvel,dc=comics
+filter=(&(objectClass=capedAvenger))
+id_field=codename
+id_value=Lobo
+pass=S4NT4DR00LZ
+
+[prefs]
+# Loglevels:
+#  info:  only the diff is printed
+#  error: die on errors
+#  warn:  warn on errors
+#  debug: die on errors, also print debug info
+loglevel=info
