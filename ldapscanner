@@ -6,47 +6,101 @@ use warnings;
 use Config::Tiny  ();
 use File::Slurper ();
 use Net::LDAP     ();
+use JSON::XS      ();
 
 die "No config file!" if !-f 'ldapscanner.cfg';
 my $cfg     = Config::Tiny->read('ldapscanner.cfg');
 my @servers = split( ',', $cfg->{'server'}{'hosts'} );
-my $proto   = $cfg->{'server'}{'ldaps'} ? 'ldaps' : 'ldap';
-my $port    = $cfg->{'server'}{'port'};
+my $proto = 'ldap';
+my %extra_args = (
+    'onerror' => ( $cfg->{'prefs'}{'loglevel'} eq 'warn' ) ? 'warn' : 'die',
+    'debug'   => $cfg->{'prefs'}{'loglevel'} eq 'debug',
+    'port'    => $cfg->{'server'}{'port'},
+    'timeout' => $cfg->{'server'}{'timeout'},
+);
+if( $cfg->{'server'}{'ldaps'} ) {
+    $proto = 'ldaps';
+    $extra_args{'verify'} = 'no';
+}
+$extra_args{'scheme'} = $proto;
 
-foreach my $server (@servers) {
-    _log( "debug", "Connecting to $proto://$server:$port..." );
-    my $conn = Net::LDAP->new(
-        "$proto://$server:$port",
-        'debug'   => $cfg->{'prefs'}{'loglevel'} eq 'debug',
-        'onerror' => 'die',
-        'async'   => 0,
-    ) or die $@;
-    _log( "debug", "Binding anonymously..." );
-    my $result = $conn->bind( 'anonymous' => 1 );
-    $result->code and die $result->error;
+_log( "info", "Connecting..." );
+my $conn = Net::LDAP->new( \@servers, %extra_args ) or die $@;
 
-    # Login if you wanna do that
-    if( scalar( grep { $cfg->{'creds'}{$_} } qw{id_field id_value pass} ) eq 3 ) {
-        #$conn->unbind;
-        _log( "debug", "Now binding as $cfg->{'creds'}{'id_value'}..." );
-        #$bind_args = "dn=$result->dn";
-        #$result = $conn->bind($bind_args);
+my @bind_args;
+my $user = 'anonymous';
+if( $cfg->{'creds'}{'dn'} && $cfg->{'creds'}{'pass'} ) {
+    push @bind_args, $cfg->{'creds'}{'dn'}, 'password', $cfg->{'creds'}{'pass'};
+    $user = "DN: $cfg->{'creds'}{'dn'}";
+}
+_log( "info", "Binding as $user..." );
+my $result = $conn->bind(@bind_args);
+$result->code and die $result->error;
+
+_log( "info", "Beginning search..." );
+$result = $conn->search(
+    base   => $cfg->{'search'}{'base'},
+    filter => $cfg->{'search'}{'filter'},
+);
+$result->code and die $result->error;
+
+my $old_entries = {};
+if( -f '.last.json' ) {
+    _log( "info", "Stored run data found, will compare against previous run." );
+    my $raw = File::Slurper::read_text('.last.json');
+    $old_entries = JSON::XS->new->decode($raw);
+} else {
+    _log( "info", "No run data found. Storing current data and exiting." );
+}
+
+my $new_entries = {};
+foreach my $entry ($result->entries) {
+    my $hr = {};
+    foreach my $attr ($entry->attributes( 'nooptions' => 1 )) {
+        $hr->{$attr} = $entry->get_value( $attr, 'nooptions' => 1 );
     }
+    $new_entries->{$entry->dn} = $hr;
+}
+_log( "info", "Found " . scalar(keys(%$new_entries)) . " records total" );
 
-    $result = $conn->search(
-        base   => $cfg->{'search'}{'base'},
-        filter => $cfg->{'search'}{'filter'},
-    );
-    $result->code and die $result->error;
-    foreach my $entry ($result->entries) {
-        $entry->dump;
+my $diff = {
+    'added'   => { map { $_ => $new_entries->{$_} } grep { !exists($old_entries->{$_}) } keys(%$new_entries) },
+    'removed' => { map { $_ => $old_entries->{$_} } grep { !exists($new_entries->{$_}) } keys(%$old_entries) },
+};
+
+File::Slurper::write_text( '.current_diff.json', JSON::XS->new->pretty->encode($diff) );
+File::Slurper::write_text( '.last.json', JSON::XS->new->pretty->encode($new_entries) );
+
+my @skip = split( ',', $cfg->{'display'}{'ignore_attrs'} );
+_log( "warn", "Added records  : " . scalar(keys(%{$diff->{'added'}})) );
+_print_records( $diff->{'added'}, @skip );
+_log( "warn", "Removed records: " . scalar(keys(%{$diff->{'removed'}})) );
+_print_records( $diff->{'removed'}, @skip );
+
+sub _print_records {
+    my ( $hr, @skip ) = @_;
+    foreach my $key ( keys(%$hr) ) {
+        _log( "warn", "------------------------------------------------" );
+        _log( "warn", "DN: " . $key );
+        foreach my $attr ( keys(%{$hr->{$key}}) ) {
+            next if grep { $_ eq $attr } @skip;
+            _log( "warn", "  $attr: $hr->{$key}{$attr}" );
+        }
     }
-    last if $result;
+    return;
 }
 
 sub _log {
     my ( $level, $msg ) = @_;
-    print "$msg\n" if $level eq $cfg->{'prefs'}{'loglevel'};
+    my %levels = (
+        'warn'  => 1,
+        'error' => 2,
+        'info'  => 3,
+        'debug' => 4,
+    );
+    my $loglevel = $levels{$cfg->{'prefs'}{'loglevel'}};
+    die "Bad log level" if !$loglevel;
+    print "$msg\n" if $levels{$level} <= $loglevel;
     return;
 }
 
