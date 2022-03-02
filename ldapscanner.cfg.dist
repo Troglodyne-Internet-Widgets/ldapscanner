@@ -4,7 +4,7 @@
 hosts=ldap.host,another.host
 port=636
 ldaps=1
-timeout=60
+timeout=5
 
 [search]
 # Put in what records you wanna find (and diff over time) here.
@@ -13,12 +13,11 @@ timeout=60
 # (&(objectClass=capedAvenger)(o=LegionOfDoom))
 base=ou=superheroes,dc=marvel,dc=comics
 filter=(objectClass=capedAvenger)
-ignore_attrs=bigBinaryBlobField,crapIDontCareAbout
 
 [creds]
 # If you need to auth with the server in order to get the
 # records you need, then enter the details below.
-# If not, don't.
+# If not, delete this section.
 dn=heroName=Lobo,ou=superheroes,dc=marvel,dc=comics
 pass=S4NT4DR00LZ
 
