@@ -1,0 +1,34 @@
+#!/usr/bin/env perl
+
+use strict;
+use warnings;
+
+use Config::Tiny  ();
+use File::Slurper ();
+use Net::LDAP     ();
+
+my $cfg     = Config::Tiny->read('ldapscanner.cfg');
+my @servers = split( ',', $cfg->{'server'}{'hosts'} );
+my $port    = $cfg->{'server'}{'port'};
+
+foreach my $server (@servers) {
+    log( "debug", "Querying $server" );
+    my $conn = Net::LDAP->new("ldaps://$server:$port");
+    my $result = $conn->bind;
+    $result->code and die $result->error;
+    $result = $conn->search(
+        base   => "ou=people,dc=cpanel,dc=net",
+        filter => "(&(objectClass=inetOrgPerson))",
+    );
+    $result->code and die $result->error;
+    my $result;
+    last if $result;
+}
+
+sub log {
+    my ( $level, $msg ) = @_;
+    print "$msg\n" if $level eq $cfg->{'prefs'}{'loglevel'};
+    return;
+}
+
+0;
